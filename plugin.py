@@ -54,10 +54,11 @@ class PluginMarketplace:
             json.dump(self.installed, f, indent=2)
     
     def _fetch_marketplace_data(self, repo: str) -> Dict:
-        """Fetch marketplace data from GitHub repository"""
-        # For the OPC skills marketplace, we'll create a predefined set of skills
-        # In a real implementation, this would fetch from a GitHub API or repo
+        """Fetch marketplace data from GitHub repository
         
+        This implementation uses a predefined marketplace catalog.
+        Future versions could extend this to dynamically fetch from GitHub API.
+        """
         if repo == "ReScienceLab/opc-skills":
             return {
                 "name": "opc-skills",
@@ -85,7 +86,7 @@ class PluginMarketplace:
                 ]
             }
         
-        raise ValueError(f"Unknown marketplace: {repo}")
+        raise ValueError(f"Unknown marketplace: {repo}. Currently only 'ReScienceLab/opc-skills' is supported. Add support for more marketplaces by extending the _fetch_marketplace_data method.")
     
     def marketplace_add(self, repo: str) -> bool:
         """Add a marketplace"""
