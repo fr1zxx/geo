@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Live Coffee Purchases — Australia</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #04060d; overflow: hidden; font-family: 'Segoe UI', Roboto, sans-serif; }
+  #globeViz { width: 100vw; height: 100vh; }
+
+  #panel {
+    position: absolute; top: 16px; left: 16px; z-index: 10;
+    color: #eee; max-width: 320px;
+  }
+  #panel h1 { font-size: 18px; margin: 0 0 4px; }
+  #panel p { font-size: 12px; color: #9aa4b2; margin: 0 0 12px; }
+
+  #stats {
+    display: flex; gap: 16px; margin-bottom: 12px;
+  }
+  .stat { background: rgba(20,24,34,0.7); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 12px; }
+  .stat .num { font-size: 20px; font-weight: 600; color: #ffce6b; }
+  .stat .lbl { font-size: 10px; color: #8a93a3; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  #feed {
+    position: absolute; top: 16px; right: 16px; z-index: 10;
+    width: 280px; max-height: 80vh; overflow-y: auto;
+    background: rgba(15,18,28,0.75); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; backdrop-filter: blur(6px);
+  }
+  #feed h2 {
+    font-size: 13px; color: #eee; margin: 0; padding: 12px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  #feedList { list-style: none; margin: 0; padding: 0; }
+  #feedList li {
+    padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 12px; color: #cfd5e0; animation: fadeIn 0.4s ease-out;
+  }
+  #feedList li .city { color: #ffce6b; font-weight: 600; }
+  #feedList li .meta { color: #707a8a; font-size: 11px; margin-top: 2px; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+  #status {
+    position: absolute; bottom: 16px; left: 16px; z-index: 10;
+    font-size: 11px; color: #5d6677; display: flex; align-items: center; gap: 6px;
+  }
+  #status .dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 8px #3ddc84; }
+  #status .dot.stub { background: #ffb454; box-shadow: 0 0 8px #ffb454; }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1>☕ Live Coffee Purchases</h1>
+  <p>Real-time purchase events across Australia</p>
+  <div id="stats">
+    <div class="stat"><div class="num" id="statCount">0</div><div class="lbl">Purchases</div></div>
+    <div class="stat"><div class="num" id="statTotal">$0</div><div class="lbl">Revenue</div></div>
+  </div>
+</div>
+
+<div id="feed">
+  <h2>Live Feed</h2>
+  <ul id="feedList"></ul>
+</div>
+
+<div id="status"><span class="dot stub" id="statusDot"></span><span id="statusText">connecting…</span></div>
+
+<div id="globeViz"></div>
+
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/globe.gl"></script>
+<script>
+/* =====================================================================
+ * DATA SOURCE — swap this out for your real backend.
+ *
+ * Expected JSON shape per purchase event:
+ *   { id: string, city: string, lat: number, lng: number,
+ *     amount: number, drink: string, timestamp: number (ms epoch) }
+ *
+ * fetchNewPurchases(sinceId) should return a Promise<Array<Event>> of
+ * events that occurred after `sinceId` (or just the latest batch).
+ * ===================================================================== */
+
+const POLL_URL = '/api/purchases';   // <-- point this at your real REST endpoint
+const POLL_INTERVAL_MS = 3000;
+const USE_STUB = true;               // flip to false once POLL_URL is live
+
+async function fetchNewPurchases(sinceId) {
+  if (USE_STUB) return stubFetchNewPurchases(sinceId);
+
+  const url = sinceId ? `${POLL_URL}?since=${encodeURIComponent(sinceId)}` : POLL_URL;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Polling failed: ${res.status}`);
+  return res.json();
+}
+
+/* ---- Stub generator (random Australian coffee purchases) ---- */
+const AU_CITIES = [
+  { city: 'Sydney',     lat: -33.8688, lng: 151.2093 },
+  { city: 'Melbourne',  lat: -37.8136, lng: 144.9631 },
+  { city: 'Brisbane',   lat: -27.4698, lng: 153.0251 },
+  { city: 'Perth',      lat: -31.9523, lng: 115.8613 },
+  { city: 'Adelaide',   lat: -34.9285, lng: 138.6007 },
+  { city: 'Canberra',   lat: -35.2809, lng: 149.1300 },
+  { city: 'Hobart',     lat: -42.8821, lng: 147.3272 },
+  { city: 'Darwin',     lat: -12.4634, lng: 130.8456 },
+  { city: 'Gold Coast', lat: -28.0167, lng: 153.4000 },
+  { city: 'Newcastle',  lat: -32.9283, lng: 151.7817 },
+];
+const DRINKS = ['Flat White', 'Long Black', 'Cappuccino', 'Latte', 'Espresso', 'Mocha', 'Piccolo'];
+let stubCounter = 0;
+
+function stubFetchNewPurchases() {
+  const n = 1 + Math.floor(Math.random() * 2);
+  const events = [];
+  for (let i = 0; i < n; i++) {
+    const c = AU_CITIES[Math.floor(Math.random() * AU_CITIES.length)];
+    events.push({
+      id: `stub-${++stubCounter}`,
+      city: c.city,
+      lat: c.lat + (Math.random() - 0.5) * 0.3,
+      lng: c.lng + (Math.random() - 0.5) * 0.3,
+      amount: +(3.5 + Math.random() * 4).toFixed(2),
+      drink: DRINKS[Math.floor(Math.random() * DRINKS.length)],
+      timestamp: Date.now(),
+    });
+  }
+  return Promise.resolve(events);
+}
+
+/* ===================== Globe rendering ===================== */
+
+const world = Globe()
+  (document.getElementById('globeViz'))
+  .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
+  .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+  .backgroundColor('#04060d')
+  .pointOfView({ lat: -25.2744, lng: 133.7751, altitude: 1.6 }, 0) // centered on Australia
+  .pointsData([])
+  .pointLat('lat')
+  .pointLng('lng')
+  .pointColor(() => '#ffce6b')
+  .pointAltitude(0.01)
+  .pointRadius(0.35)
+  .ringsData([])
+  .ringLat('lat')
+  .ringLng('lng')
+  .ringColor(() => t => `rgba(255,206,107,${1 - t})`)
+  .ringMaxRadius(4)
+  .ringPropagationSpeed(3)
+  .ringRepeatPeriod(0);
+
+world.controls().autoRotate = true;
+world.controls().autoRotateSpeed = 0.25;
+
+let totalCount = 0;
+let totalRevenue = 0;
+const statCount = document.getElementById('statCount');
+const statTotal = document.getElementById('statTotal');
+const feedList = document.getElementById('feedList');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+
+function addPurchase(ev) {
+  totalCount++;
+  totalRevenue += ev.amount;
+  statCount.textContent = totalCount;
+  statTotal.textContent = `$${totalRevenue.toFixed(2)}`;
+
+  world.ringsData([...world.ringsData(), ev]);
+  setTimeout(() => {
+    world.ringsData(world.ringsData().filter(r => r.id !== ev.id));
+  }, 1800);
+
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="city">${ev.city}</span> — ${ev.drink} · $${ev.amount.toFixed(2)}
+    <div class="meta">${new Date(ev.timestamp).toLocaleTimeString()}</div>`;
+  feedList.prepend(li);
+  while (feedList.children.length > 40) feedList.removeChild(feedList.lastChild);
+}
+
+let lastId = null;
+async function poll() {
+  try {
+    const events = await fetchNewPurchases(lastId);
+    events.forEach(addPurchase);
+    if (events.length) lastId = events[events.length - 1].id;
+    statusDot.className = USE_STUB ? 'dot stub' : 'dot';
+    statusText.textContent = USE_STUB ? 'live (simulated)' : 'live';
+  } catch (err) {
+    statusDot.className = 'dot stub';
+    statusText.textContent = `error: ${err.message}`;
+  } finally {
+    setTimeout(poll, POLL_INTERVAL_MS);
+  }
+}
+poll();
+
+window.addEventListener('resize', () => {
+  world.width(window.innerWidth).height(window.innerHeight);
+});
+</script>
+</body>
+</html>
